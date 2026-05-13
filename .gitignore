@@ -1,0 +1,11 @@
+node_modules/
+tmp-home/
+*-test-home/
+*.bak-codexbar-win-last
+*.bak-codex-switch-last
+.tmp-*/
+.tmp-usage/
+npm-debug.log*
+*.local.json
+dist/
+release/

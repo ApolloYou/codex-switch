@@ -1,0 +1,33 @@
+{
+  "name": "codex-switch",
+  "version": "0.1.0",
+  "private": false,
+  "description": "you only oauth once (yooo) - Windows account switcher for OpenAI Codex Desktop.",
+  "keywords": [
+    "codex",
+    "openai",
+    "account-switcher",
+    "windows"
+  ],
+  "main": "codex-switch.js",
+  "bin": {
+    "codex-switch": "./codex-switch.js"
+  },
+  "scripts": {
+    "smoke": "node ./codex-switch.js --home ./tmp-home paths",
+    "test:gateway": "node ./scripts/gateway-smoke-test.js",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./codex-switch-panel.ps1",
+    "panel": "powershell -NoProfile -ExecutionPolicy Bypass -File ./codex-switch-panel.ps1",
+    "usage": "node ./usage.js",
+    "import:codex-auth": "node ./import-codex-auth.js",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File ./install-shortcut.ps1"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
