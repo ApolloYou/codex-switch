@@ -1,6 +1,6 @@
 # codex-switch
 
-**you only oauth once (yooo)**
+**You Only Oauth Once**
 
 中文 | [English](#english)
 
