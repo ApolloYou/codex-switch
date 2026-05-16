@@ -329,12 +329,14 @@ function Refresh-Usage([switch]$Fresh) {
     Update-TotalCost
     Set-Status "Usage refreshed $(Get-Date -Format HH:mm:ss)"
   } catch {
-    Set-Status "Usage refresh failed"
+    $message = $_.Exception.Message
+    Set-Status "Usage refresh failed: $message"
     foreach ($item in $accounts.Items) {
       $item.SubItems[1].Text = "ERR"
       $item.SubItems[2].Text = "ERR"
       $item.SubItems[3].Text = "ERR"
       $item.SubItems[4].Text = "ERR"
+      $item.ToolTipText = $message
     }
   }
 }

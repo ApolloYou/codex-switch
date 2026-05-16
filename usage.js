@@ -11,6 +11,7 @@ const LEGACY_CONFIG_PATH = path.join(os.homedir(), '.codexbar-win', 'config.json
 const USER_CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const CACHE_PATH = path.join(os.homedir(), '.codex-switch', 'usage-cache.json');
 const TMP_ROOT = path.join(PROJECT_DIR, '.tmp-usage');
+const FRESH_TMP_PREFIX = '.fresh-';
 const TOKEN_BUDGETS = {
   primary: 16_000_000,
   secondary: 100_000_000,
@@ -81,6 +82,7 @@ async function readUsageWithRetry(account, options = {}) {
 function readUsageViaCodexAppServer(account, options = {}) {
   return new Promise((resolve, reject) => {
     const codexHome = prepareCodexHome(account, options);
+    const cleanupCodexHome = options.fresh ? codexHome : null;
     const child = childProcess.spawn('codex', ['app-server'], {
       cwd: PROJECT_DIR,
       env: { ...process.env, CODEX_HOME: codexHome },
@@ -135,6 +137,7 @@ function readUsageViaCodexAppServer(account, options = {}) {
       settled = true;
       clearTimeout(timeout);
       try { child.kill(); } catch (_) {}
+      if (cleanupCodexHome) cleanupTempDirSoon(cleanupCodexHome);
       if (error) reject(error);
       else resolve(result);
     }
@@ -143,9 +146,10 @@ function readUsageViaCodexAppServer(account, options = {}) {
 
 function prepareCodexHome(account, options = {}) {
   const safe = String(account.id).replace(/[^a-zA-Z0-9_.-]/g, '_');
-  const codexHome = path.join(TMP_ROOT, safe);
+  const codexHome = options.fresh
+    ? fs.mkdtempSync(path.join(TMP_ROOT, `${FRESH_TMP_PREFIX}${safe}-`))
+    : path.join(TMP_ROOT, safe);
   fs.mkdirSync(codexHome, { recursive: true });
-  if (options.fresh) clearCodexHomeRuntimeState(codexHome);
   fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({
     OPENAI_API_KEY: null,
     tokens: {
@@ -160,13 +164,10 @@ function prepareCodexHome(account, options = {}) {
   return codexHome;
 }
 
-function clearCodexHomeRuntimeState(codexHome) {
-  const names = safeListDir(codexHome);
-  for (const name of names) {
-    if (/^(state|logs)_\d+\.sqlite(?:-(?:shm|wal))?$/.test(name)) {
-      try { fs.rmSync(path.join(codexHome, name), { force: true }); } catch (_) {}
-    }
-  }
+function cleanupTempDirSoon(dir) {
+  setTimeout(() => {
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 }); } catch (_) {}
+  }, 1200);
 }
 
 function buildUsageConfigToml() {
@@ -189,10 +190,6 @@ function findTomlScalar(source, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = source.match(new RegExp(`^${escaped}\\s*=\\s*["']?([^"'\\r\\n#]+)["']?`, 'm'));
   return match ? match[1].trim() : null;
-}
-
-function safeListDir(dir) {
-  try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
 function normalizeResult(account, rateLimits) {
