@@ -292,6 +292,7 @@ function Format-UsageTooltip($Usage) {
   if ($Usage.stale) { $parts += "cached" } else { $parts += "live" }
   $time = Format-RefreshTime $Usage.refreshedAt
   if ($time) { $parts += "refreshed $time" }
+  if ($Usage.error) { $parts += "last live error: $($Usage.error)" }
   if ($Usage.estimateNote) { $parts += [string]$Usage.estimateNote }
   return ($parts -join "; ")
 }
@@ -307,9 +308,11 @@ function Refresh-Usage([switch]$Fresh) {
     foreach ($usage in $usageRows) {
       $usageById[[string]$usage.id] = $usage
     }
+    $hadStale = $false
     foreach ($item in $accounts.Items) {
       $usage = $usageById[[string]$item.Name]
       if ($usage -and $usage.ok) {
+        if ($usage.stale) { $hadStale = $true }
         $item.SubItems[1].Text = "$(if ($usage.primary) { $usage.primary.remainingPercent } else { '-' })%"
         $item.SubItems[2].Text = "$(if ($usage.secondary) { $usage.secondary.remainingPercent } else { '-' })%"
         $item.SubItems[3].Text = "$(if ($usage.todayCost) { $usage.todayCost } else { '-' })"
@@ -327,7 +330,11 @@ function Refresh-Usage([switch]$Fresh) {
       }
     }
     Update-TotalCost
-    Set-Status "Usage refreshed $(Get-Date -Format HH:mm:ss)"
+    if ($hadStale) {
+      Set-Status "Usage refresh used cached fallback $(Get-Date -Format HH:mm:ss)"
+    } else {
+      Set-Status "Usage refreshed $(Get-Date -Format HH:mm:ss)"
+    }
   } catch {
     $message = $_.Exception.Message
     Set-Status "Usage refresh failed: $message"
@@ -409,7 +416,11 @@ function Refresh-SelectedUsage([switch]$Fresh) {
       $item.SubItems[3].Text = "$(if ($usage.todayCost) { $usage.todayCost } else { '-' })"
       $item.SubItems[4].Text = "$(if ($usage.monthCost) { $usage.monthCost } else { '-' })"
       $item.ToolTipText = Format-UsageTooltip $usage
-      Set-Status "Usage refreshed for $($item.Text) $(Get-Date -Format HH:mm:ss)"
+      if ($usage.stale) {
+        Set-Status "Usage cached fallback for $($item.Text) $(Get-Date -Format HH:mm:ss)"
+      } else {
+        Set-Status "Usage refreshed for $($item.Text) $(Get-Date -Format HH:mm:ss)"
+      }
     } elseif ($usage) {
       $item.SubItems[1].Text = "ERR"
       $item.SubItems[2].Text = "ERR"

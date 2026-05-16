@@ -25,7 +25,8 @@ main().catch((error) => {
 async function main() {
   const args = process.argv.slice(2);
   const json = args.includes('--json');
-  const fresh = args.includes('--fresh') || args.includes('--no-cache');
+  const noCache = args.includes('--no-cache');
+  const fresh = args.includes('--fresh') || noCache;
   const accountId = valueAfter(args, '--account');
   migrateLegacyConfig();
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -37,13 +38,18 @@ async function main() {
     : provider.accounts;
 
   fs.mkdirSync(TMP_ROOT, { recursive: true });
-  const cache = fresh ? {} : readCache();
+  const cache = noCache ? {} : readCache();
   const results = [];
   for (const account of accounts) {
     const result = await readUsageWithRetry(account, { fresh }).catch((error) => {
       const cached = cache[account.id];
-      if (!fresh && cached) {
-        return { ...cached, stale: true, error: compactError(error) };
+      if (!noCache && cached) {
+        return {
+          ...cached,
+          stale: true,
+          error: compactError(error),
+          summary: `${cached.summary || 'usage unavailable'} | cached fallback`,
+        };
       }
       return {
         id: account.id,
