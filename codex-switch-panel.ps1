@@ -277,10 +277,31 @@ function Refresh-Accounts {
   Set-Status "Ready"
 }
 
-function Refresh-Usage {
+function Format-RefreshTime($Value) {
+  if (!$Value) { return "" }
   try {
-    Set-Status "Refreshing usage..."
-    $jsonText = Invoke-NodeScript "usage.js" @("--json")
+    $dt = [DateTime]::Parse([string]$Value).ToLocalTime()
+    return $dt.ToString("HH:mm:ss")
+  } catch {
+    return ""
+  }
+}
+
+function Format-UsageTooltip($Usage) {
+  $parts = @()
+  if ($Usage.stale) { $parts += "cached" } else { $parts += "live" }
+  $time = Format-RefreshTime $Usage.refreshedAt
+  if ($time) { $parts += "refreshed $time" }
+  if ($Usage.estimateNote) { $parts += [string]$Usage.estimateNote }
+  return ($parts -join "; ")
+}
+
+function Refresh-Usage([switch]$Fresh) {
+  try {
+    if ($Fresh) { Set-Status "Force refreshing usage..." } else { Set-Status "Refreshing usage..." }
+    $usageArgs = @("--json")
+    if ($Fresh) { $usageArgs += "--fresh" }
+    $jsonText = Invoke-NodeScript "usage.js" $usageArgs
     $usageRows = ConvertFrom-Json $jsonText
     $usageById = @{}
     foreach ($usage in $usageRows) {
@@ -293,10 +314,12 @@ function Refresh-Usage {
         $item.SubItems[2].Text = "$(if ($usage.secondary) { $usage.secondary.remainingPercent } else { '-' })%"
         $item.SubItems[3].Text = "$(if ($usage.todayCost) { $usage.todayCost } else { '-' })"
         $item.SubItems[4].Text = "$(if ($usage.monthCost) { $usage.monthCost } else { '-' })"
-        $item.ToolTipText = "$(if ($usage.stale) { 'cached; ' } else { '' })$($usage.estimateNote)"
+        $item.ToolTipText = Format-UsageTooltip $usage
       } elseif ($usage) {
         $item.SubItems[1].Text = "ERR"
         $item.SubItems[2].Text = "ERR"
+        $item.SubItems[3].Text = "ERR"
+        $item.SubItems[4].Text = "ERR"
         $item.ToolTipText = [string]$usage.error
       } else {
         $item.SubItems[1].Text = "N/A"
@@ -304,11 +327,14 @@ function Refresh-Usage {
       }
     }
     Update-TotalCost
-    Set-Status "Usage refreshed"
+    Set-Status "Usage refreshed $(Get-Date -Format HH:mm:ss)"
   } catch {
     Set-Status "Usage refresh failed"
     foreach ($item in $accounts.Items) {
+      $item.SubItems[1].Text = "ERR"
+      $item.SubItems[2].Text = "ERR"
       $item.SubItems[3].Text = "ERR"
+      $item.SubItems[4].Text = "ERR"
     }
   }
 }
@@ -365,12 +391,14 @@ function Format-Tokens([double]$Value) {
   return ([Math]::Round($Value).ToString())
 }
 
-function Refresh-SelectedUsage {
+function Refresh-SelectedUsage([switch]$Fresh) {
   if ($accounts.SelectedItems.Count -lt 1) { return }
   $item = $accounts.SelectedItems[0]
   try {
-    Set-Status "Refreshing $($item.Text)..."
-    $jsonText = Invoke-NodeScript "usage.js" @("--json", "--account", $item.Name)
+    if ($Fresh) { Set-Status "Force refreshing $($item.Text)..." } else { Set-Status "Refreshing $($item.Text)..." }
+    $usageArgs = @("--json", "--account", $item.Name)
+    if ($Fresh) { $usageArgs += "--fresh" }
+    $jsonText = Invoke-NodeScript "usage.js" $usageArgs
     $usageRows = ConvertFrom-Json $jsonText
     $usage = @($usageRows)[0]
     if ($usage -and $usage.ok) {
@@ -378,11 +406,13 @@ function Refresh-SelectedUsage {
       $item.SubItems[2].Text = "$(if ($usage.secondary) { $usage.secondary.remainingPercent } else { '-' })%"
       $item.SubItems[3].Text = "$(if ($usage.todayCost) { $usage.todayCost } else { '-' })"
       $item.SubItems[4].Text = "$(if ($usage.monthCost) { $usage.monthCost } else { '-' })"
-      $item.ToolTipText = "$(if ($usage.stale) { 'cached; ' } else { '' })$($usage.estimateNote)"
-      Set-Status "Usage refreshed for $($item.Text)"
+      $item.ToolTipText = Format-UsageTooltip $usage
+      Set-Status "Usage refreshed for $($item.Text) $(Get-Date -Format HH:mm:ss)"
     } elseif ($usage) {
       $item.SubItems[1].Text = "ERR"
       $item.SubItems[2].Text = "ERR"
+      $item.SubItems[3].Text = "ERR"
+      $item.SubItems[4].Text = "ERR"
       $item.ToolTipText = [string]$usage.error
       Set-Status "Usage error: $($usage.error)"
     }
@@ -402,7 +432,7 @@ $switchButton.Add_Click({
     Set-Status "Switching to $(Mask-Email $account.label)..."
     Invoke-NodeCli @("use", "--provider", $script:ProviderId, "--account", $account.id) | Out-Null
     Refresh-Accounts
-    Refresh-Usage
+    Refresh-Usage -Fresh
 
     if ($restartCheck.Checked) {
       Set-Status "Restarting Codex Desktop..."
@@ -420,10 +450,10 @@ $switchButton.Add_Click({
 $accounts.Add_DoubleClick({ $switchButton.PerformClick() })
 $accounts.Add_KeyDown({
   if ($_.KeyCode -eq [System.Windows.Forms.Keys]::F5) {
-    Refresh-SelectedUsage
+    Refresh-SelectedUsage -Fresh
   }
 })
-$refreshButton.Add_Click({ try { Refresh-Accounts; Refresh-Usage } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Refresh failed") | Out-Null } })
+$refreshButton.Add_Click({ try { Refresh-Accounts; Refresh-Usage -Fresh } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Refresh failed") | Out-Null } })
 $closeButton.Add_Click({ $form.Close() })
 
 Refresh-Accounts

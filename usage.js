@@ -8,6 +8,7 @@ const path = require('node:path');
 const PROJECT_DIR = __dirname;
 const CONFIG_PATH = path.join(os.homedir(), '.codex-switch', 'config.json');
 const LEGACY_CONFIG_PATH = path.join(os.homedir(), '.codexbar-win', 'config.json');
+const USER_CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 const CACHE_PATH = path.join(os.homedir(), '.codex-switch', 'usage-cache.json');
 const TMP_ROOT = path.join(PROJECT_DIR, '.tmp-usage');
 const TOKEN_BUDGETS = {
@@ -23,6 +24,7 @@ main().catch((error) => {
 async function main() {
   const args = process.argv.slice(2);
   const json = args.includes('--json');
+  const fresh = args.includes('--fresh') || args.includes('--no-cache');
   const accountId = valueAfter(args, '--account');
   migrateLegacyConfig();
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -34,12 +36,12 @@ async function main() {
     : provider.accounts;
 
   fs.mkdirSync(TMP_ROOT, { recursive: true });
-  const cache = readCache();
+  const cache = fresh ? {} : readCache();
   const results = [];
   for (const account of accounts) {
-    const result = await readUsageWithRetry(account).catch((error) => {
+    const result = await readUsageWithRetry(account, { fresh }).catch((error) => {
       const cached = cache[account.id];
-      if (cached) {
+      if (!fresh && cached) {
         return { ...cached, stale: true, error: compactError(error) };
       }
       return {
@@ -63,11 +65,11 @@ async function main() {
   }
 }
 
-async function readUsageWithRetry(account) {
+async function readUsageWithRetry(account, options = {}) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await readUsageViaCodexAppServer(account);
+      return await readUsageViaCodexAppServer(account, options);
     } catch (error) {
       lastError = error;
       await sleep(700 * attempt);
@@ -76,9 +78,9 @@ async function readUsageWithRetry(account) {
   throw lastError;
 }
 
-function readUsageViaCodexAppServer(account) {
+function readUsageViaCodexAppServer(account, options = {}) {
   return new Promise((resolve, reject) => {
-    const codexHome = prepareCodexHome(account);
+    const codexHome = prepareCodexHome(account, options);
     const child = childProcess.spawn('codex', ['app-server'], {
       cwd: PROJECT_DIR,
       env: { ...process.env, CODEX_HOME: codexHome },
@@ -139,10 +141,11 @@ function readUsageViaCodexAppServer(account) {
   });
 }
 
-function prepareCodexHome(account) {
+function prepareCodexHome(account, options = {}) {
   const safe = String(account.id).replace(/[^a-zA-Z0-9_.-]/g, '_');
   const codexHome = path.join(TMP_ROOT, safe);
   fs.mkdirSync(codexHome, { recursive: true });
+  if (options.fresh) clearCodexHomeRuntimeState(codexHome);
   fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({
     OPENAI_API_KEY: null,
     tokens: {
@@ -153,8 +156,43 @@ function prepareCodexHome(account) {
     },
     last_refresh: account.lastRefresh || new Date().toISOString(),
   }, null, 2));
-  fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model = "gpt-5.4"\n');
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), buildUsageConfigToml());
   return codexHome;
+}
+
+function clearCodexHomeRuntimeState(codexHome) {
+  const names = safeListDir(codexHome);
+  for (const name of names) {
+    if (/^(state|logs)_\d+\.sqlite(?:-(?:shm|wal))?$/.test(name)) {
+      try { fs.rmSync(path.join(codexHome, name), { force: true }); } catch (_) {}
+    }
+  }
+}
+
+function buildUsageConfigToml() {
+  const source = readUserCodexConfig();
+  const lines = [];
+  const model = findTomlScalar(source, 'model') || 'gpt-5.4';
+  const provider = findTomlScalar(source, 'model_provider') || 'openai';
+  const effort = findTomlScalar(source, 'model_reasoning_effort');
+  lines.push(`model = ${JSON.stringify(model)}`);
+  lines.push(`model_provider = ${JSON.stringify(provider)}`);
+  if (effort) lines.push(`model_reasoning_effort = ${JSON.stringify(effort)}`);
+  return `${lines.join('\n')}\n`;
+}
+
+function readUserCodexConfig() {
+  try { return fs.readFileSync(USER_CODEX_CONFIG_PATH, 'utf8'); } catch (_) { return ''; }
+}
+
+function findTomlScalar(source, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = source.match(new RegExp(`^${escaped}\\s*=\\s*["']?([^"'\\r\\n#]+)["']?`, 'm'));
+  return match ? match[1].trim() : null;
+}
+
+function safeListDir(dir) {
+  try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
 function normalizeResult(account, rateLimits) {
