@@ -1,4 +1,4 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-npm run panel
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0codex-switch-panel.ps1"
